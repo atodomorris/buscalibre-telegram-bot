@@ -1,6 +1,7 @@
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 const fs = require("fs");
+const qs = require("qs"); // Asegúrate de instalarlo: npm install qs
 
 // ---------------------------
 // Función para limpiar caracteres raros
@@ -17,7 +18,8 @@ function limpiarTexto(texto) {
     .replace(/Ã³/g, "ó")
     .replace(/Ãº/g, "ú")
     .replace(/Ã±/g, "ñ")
-    .replace(/Ã/g, "Á");
+    .replace(/Ã/g, "Á")
+    .replace(/&iexcl;/g, "¡"); // adicional para tu caso
 }
 
 // ---------------------------
@@ -26,8 +28,13 @@ function limpiarTexto(texto) {
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
+  console.error("❌ ERROR: Variables de entorno TELEGRAM_TOKEN o TELEGRAM_CHAT_ID no están definidas.");
+  process.exit(1);
+}
+
 // ---------------------------
-// Función para enviar mensaje
+// Función para enviar mensaje a Telegram
 // ---------------------------
 async function enviarTelegram(promo) {
   const mensaje = `📢 *Nueva promo detectada!*\n\n` +
@@ -35,12 +42,17 @@ async function enviarTelegram(promo) {
                   `*Link:* [Ir a Buscalibre](${promo.link})`;
 
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`, {
+    const data = qs.stringify({
       chat_id: TELEGRAM_CHAT_ID,
       photo: promo.imagen,
       caption: mensaje,
       parse_mode: "Markdown"
     });
+
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`, data, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+
     console.log("✅ Promo enviada a Telegram!");
   } catch (err) {
     console.error("❌ Error enviando a Telegram:", err.message);
@@ -48,7 +60,7 @@ async function enviarTelegram(promo) {
 }
 
 // ---------------------------
-// Función que hace TODO el scraping y envío
+// Función principal: scraping y envío
 // ---------------------------
 async function buscarPromo() {
   console.log("🔎 Buscando promo en Buscalibre -", new Date().toLocaleString());
@@ -83,8 +95,8 @@ async function buscarPromo() {
   // ---------------------------
   // Comprobar si la promo cambió
   // ---------------------------
-  let ultimaPromo = null;
   const archivoPromo = "ultimaPromo.json";
+  let ultimaPromo = null;
 
   if (fs.existsSync(archivoPromo)) {
     ultimaPromo = JSON.parse(fs.readFileSync(archivoPromo, "utf-8"));
@@ -112,4 +124,3 @@ buscarPromo();
 // Ejecutar cada 1 hora (3600000 ms)
 // ---------------------------
 setInterval(buscarPromo, 3600000);
-
