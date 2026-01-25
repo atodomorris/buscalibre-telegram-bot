@@ -1,7 +1,7 @@
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 const fs = require("fs");
-const qs = require("qs"); // Asegúrate de instalarlo: npm install qs
+const qs = require("qs"); // npm install qs
 
 // ---------------------------
 // Función para limpiar caracteres raros
@@ -19,11 +19,11 @@ function limpiarTexto(texto) {
     .replace(/Ãº/g, "ú")
     .replace(/Ã±/g, "ñ")
     .replace(/Ã/g, "Á")
-    .replace(/&iexcl;/g, "¡"); // adicional para tu caso
+    .replace(/&iexcl;/g, "¡");
 }
 
 // ---------------------------
-// Configuración Telegram desde variables de entorno
+// Variables de entorno de Telegram
 // ---------------------------
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -79,13 +79,22 @@ async function buscarPromo() {
   await page.waitForSelector("body", { timeout: 20000 });
   await new Promise(resolve => setTimeout(resolve, 3000));
 
+  // ---------------------------
+  // Scraping del banner principal
+  // ---------------------------
   const promo = await page.evaluate(() => {
-    const img = document.querySelector("section img[alt]");
-    const link = img?.closest("a");
+    const banner = document.querySelector("section#portadaHome a");
+    if (!banner) return { texto: "SIN TEXTO", link: "SIN LINK", imagen: "SIN IMAGEN" };
+
+    const img = banner.querySelector("img");
+    let link = banner.href;
+    if (link && !link.startsWith("http")) {
+      link = "https://www.buscalibre.cl" + link;
+    }
 
     return {
-      texto: img?.alt || "SIN TEXTO",
-      link: link?.href || "SIN LINK",
+      texto: img?.alt || banner.title || "SIN TEXTO",
+      link: link || "SIN LINK",
       imagen: img?.src || "SIN IMAGEN"
     };
   });
@@ -121,6 +130,6 @@ async function buscarPromo() {
 buscarPromo();
 
 // ---------------------------
-// Ejecutar cada 1 hora (3600000 ms)
+// Ejecutar cada 1 hora
 // ---------------------------
 setInterval(buscarPromo, 3600000);
