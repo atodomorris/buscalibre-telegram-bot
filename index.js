@@ -23,7 +23,7 @@ function limpiarTexto(texto) {
 }
 
 // ---------------------------
-// Variables de entorno de Telegram
+// Variables de entorno Telegram
 // ---------------------------
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -34,19 +34,20 @@ if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
 }
 
 // ---------------------------
-// Función para enviar mensaje a Telegram
-// ---------------------------
+// Función para enviar mensaje con botón 🚀
 async function enviarTelegram(promo) {
-  const mensaje = `📢 *Nueva promo detectada!*\n\n` +
-                  `*Texto:* ${promo.texto}\n` +
-                  `*Link:* [Ir a Buscalibre](${promo.link})`;
+  const mensaje = `🚨 *NUEVA PROMO DETECTADA!*\n\n` +
+                  `*${promo.texto.toUpperCase()}*`;
 
   try {
     const data = qs.stringify({
       chat_id: TELEGRAM_CHAT_ID,
       photo: promo.imagen,
       caption: mensaje,
-      parse_mode: "Markdown"
+      parse_mode: "Markdown",
+      reply_markup: JSON.stringify({
+        inline_keyboard: [[{ text: "🚀 Ver Ofertas", url: promo.link }]]
+      })
     });
 
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`, data, {
@@ -79,22 +80,15 @@ async function buscarPromo() {
   await page.waitForSelector("body", { timeout: 20000 });
   await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // ---------------------------
-  // Scraping del banner principal
-  // ---------------------------
+  // Obtenemos la promo correcta
   const promo = await page.evaluate(() => {
-    const banner = document.querySelector("section#portadaHome a");
-    if (!banner) return { texto: "SIN TEXTO", link: "SIN LINK", imagen: "SIN IMAGEN" };
-
-    const img = banner.querySelector("img");
-    let link = banner.href;
-    if (link && !link.startsWith("http")) {
-      link = "https://www.buscalibre.cl" + link;
-    }
+    // Banner cambiante con imagen
+    const img = document.querySelector("section#portadaHome img[alt]");
+    const link = img?.closest("a");
 
     return {
-      texto: img?.alt || banner.title || "SIN TEXTO",
-      link: link || "SIN LINK",
+      texto: img?.alt || "SIN TEXTO",
+      link: link ? "https://www.buscalibre.cl" + link.getAttribute("href") : "SIN LINK",
       imagen: img?.src || "SIN IMAGEN"
     };
   });
@@ -125,11 +119,11 @@ async function buscarPromo() {
 }
 
 // ---------------------------
-// Ejecutar la primera vez
+// Ejecutar primera vez
 // ---------------------------
 buscarPromo();
 
 // ---------------------------
-// Ejecutar cada 1 hora
+// Revisar cada 1 hora (3600000 ms)
 // ---------------------------
 setInterval(buscarPromo, 3600000);
