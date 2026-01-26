@@ -1,3 +1,4 @@
+// index.js
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 const fs = require("fs");
@@ -34,15 +35,33 @@ if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
 }
 
 // ---------------------------
-// Función para enviar mensaje con botón 🚀
+// Variables Cloudinary
+// ---------------------------
+const CLOUD_NAME = "dvye0cje6";
+const COLOR_FONDO = "fe8d10"; // fondo naranja
+
+// ---------------------------
+// Función para transformar imagen con Cloudinary
+// ---------------------------
+function cloudinaryFetch(urlOriginal) {
+  if (!urlOriginal) return urlOriginal;
+
+  return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/b_rgb:${COLOR_FONDO},f_jpg/${encodeURIComponent(urlOriginal)}`;
+}
+
+// ---------------------------
+// Función para enviar mensaje a Telegram
+// ---------------------------
 async function enviarTelegram(promo) {
   const mensaje = `🚨 *NUEVA PROMO DETECTADA!*\n\n` +
                   `*${promo.texto.toUpperCase()}*`;
 
+  const urlTransformada = cloudinaryFetch(promo.imagen);
+
   try {
     const data = qs.stringify({
       chat_id: TELEGRAM_CHAT_ID,
-      photo: promo.imagen,
+      photo: urlTransformada,
       caption: mensaje,
       parse_mode: "Markdown",
       reply_markup: JSON.stringify({
@@ -54,7 +73,7 @@ async function enviarTelegram(promo) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
 
-    console.log("✅ Promo enviada a Telegram!");
+    console.log("✅ Promo enviada a Telegram con fondo!");
   } catch (err) {
     console.error("❌ Error enviando a Telegram:", err.message);
   }
@@ -63,7 +82,7 @@ async function enviarTelegram(promo) {
 // ---------------------------
 // Función principal: scraping y envío
 // ---------------------------
-async function buscarPromo() {
+async function buscarPromo(enviarMensajePrueba = false) {
   console.log("🔎 Buscando promo en Buscalibre -", new Date().toLocaleString());
 
   const browser = await puppeteer.launch({
@@ -80,9 +99,8 @@ async function buscarPromo() {
   await page.waitForSelector("body", { timeout: 20000 });
   await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // Obtenemos la promo correcta
+  // Obtenemos la promo actual
   const promo = await page.evaluate(() => {
-    // Banner cambiante con imagen
     const img = document.querySelector("section#portadaHome img[alt]");
     const link = img?.closest("a");
 
@@ -95,9 +113,6 @@ async function buscarPromo() {
 
   promo.texto = limpiarTexto(promo.texto);
 
-  // ---------------------------
-  // Comprobar si la promo cambió
-  // ---------------------------
   const archivoPromo = "ultimaPromo.json";
   let ultimaPromo = null;
 
@@ -105,8 +120,17 @@ async function buscarPromo() {
     ultimaPromo = JSON.parse(fs.readFileSync(archivoPromo, "utf-8"));
   }
 
-  if (!ultimaPromo || JSON.stringify(ultimaPromo) !== JSON.stringify(promo)) {
+  // Si es el mensaje de prueba, lo enviamos siempre
+  if (enviarMensajePrueba) {
+    console.log("📤 Enviando mensaje de prueba con la promo actual...");
     await enviarTelegram(promo);
+  }
+
+  // Comprobamos si la promo cambió
+  if (!ultimaPromo || JSON.stringify(ultimaPromo) !== JSON.stringify(promo)) {
+    if (!enviarMensajePrueba) {
+      await enviarTelegram(promo);
+    }
     fs.writeFileSync(archivoPromo, JSON.stringify(promo, null, 2), "utf-8");
   } else {
     console.log("ℹ️ Promo sin cambios. No se envía nada.");
@@ -119,11 +143,12 @@ async function buscarPromo() {
 }
 
 // ---------------------------
-// Ejecutar primera vez
+// Ejecutar primera vez con mensaje de prueba
 // ---------------------------
-buscarPromo();
+buscarPromo(true);
 
 // ---------------------------
 // Revisar cada 1 hora (3600000 ms)
 // ---------------------------
 setInterval(buscarPromo, 3600000);
+
