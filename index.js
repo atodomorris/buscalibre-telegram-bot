@@ -65,14 +65,17 @@ function cloudinaryFetch(urlOriginal) {
 }
 
 // ---------------------------
-// Envío UN SOLO mensaje (texto + imagen preview invisible + botón)
+// Envío UN SOLO mensaje (Mejorado: Negrita + Sin espacio extra)
 // ---------------------------
 async function enviarTelegram(promo) {
   const imagen = cloudinaryFetch(promo.imagen);
 
+  // MODIFICACIÓN:
+  // 1. Se añaden etiquetas <b> para negrita.
+  // 2. Se reduce el espaciado (\n) antes de la etiqueta <a> para quitar el hueco blanco.
   const mensaje =
-    `🚨 NUEVA PROMO DETECTADA!\n\n` +
-    `${textoSeguro(promo.texto)}\n\n` +
+    `<b>🚨 NUEVA PROMO DETECTADA!</b>\n` +
+    `<b>${textoSeguro(promo.texto)}</b>` +
     `<a href="${imagen}">&#8205;</a>`;
 
   await axios.post(
@@ -91,7 +94,7 @@ async function enviarTelegram(promo) {
     { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
   );
 
-  console.log("✅ Promo enviada (link invisible)");
+  console.log("✅ Promo enviada (link invisible optimizado)");
 }
 
 // ---------------------------
