@@ -9,10 +9,18 @@ const mongoose = require("mongoose");
 const CLOUD_NAME = "dvye0cje6";
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const MONGO_URI = process.env.MONGO_URI; // <--- NUEVA VARIABLE OBLIGATORIA
+const MONGO_URI = process.env.MONGO_URI;
+
+// --- INICIO DIAGNÓSTICO DE VARIABLES ---
+console.log("🔍 --- INICIANDO REVISIÓN DE VARIABLES ---");
+console.log(`1. TELEGRAM_TOKEN:   ${TELEGRAM_TOKEN ? "✅ CORRECTO" : "❌ FALTA (Revisa si está vacía o mal escrita)"}`);
+console.log(`2. TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID ? "✅ CORRECTO" : "❌ FALTA (Revisa si está vacía o mal escrita)"}`);
+console.log(`3. MONGO_URI:        ${MONGO_URI ? "✅ CORRECTO" : "❌ FALTA (Revisa si está vacía o mal escrita)"}`);
+console.log("------------------------------------------");
+// --- FIN DIAGNÓSTICO ---
 
 if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID || !MONGO_URI) {
-  console.error("❌ ERROR: Faltan variables de entorno (Telegram o Mongo).");
+  console.error("🔥 ERROR FATAL: El bot se detendrá porque falta una variable marcada con ❌ arriba.");
   process.exit(1);
 }
 
@@ -27,6 +35,7 @@ const promoSchema = new mongoose.Schema({
   fecha: { type: Date, default: Date.now }
 });
 
+// Crea la colección "promobuscalibres" automáticamente
 const PromoModel = mongoose.model("PromoBuscalibre", promoSchema);
 
 // ---------------------------
@@ -92,8 +101,13 @@ async function buscarPromo(esPrueba = false) {
 
   // Conectar a Mongo si no estamos conectados
   if (mongoose.connection.readyState === 0) {
-    await mongoose.connect(MONGO_URI);
-    console.log("💾 Conectado a MongoDB.");
+    try {
+      await mongoose.connect(MONGO_URI);
+      console.log("💾 Conectado a MongoDB exitosamente.");
+    } catch (err) {
+      console.error("❌ Error conectando a MongoDB:", err.message);
+      return; // Detener si no hay base de datos
+    }
   }
 
   const browser = await puppeteer.launch({
@@ -119,7 +133,9 @@ async function buscarPromo(esPrueba = false) {
     });
 
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
-    await page.goto("https://www.buscalibre.cl", { waitUntil: "domcontentloaded", timeout: 30000 });
+    
+    // Timeout aumentado a 60s por si la red es lenta
+    await page.goto("https://www.buscalibre.cl", { waitUntil: "domcontentloaded", timeout: 60000 });
 
     // --- SCRAPING ---
     const datosScraped = await page.evaluate(() => {
@@ -176,7 +192,7 @@ async function buscarPromo(esPrueba = false) {
     // PRIMERA VEZ (Base de datos vacía)
     else if (!ultimaPromoDB) {
       console.log("🆕 Base de datos vacía. Guardando estado inicial (Silent Start).");
-      // Creamos el primer registro sin notificar para evitar spam al deployar
+      // Guardamos sin notificar
       await PromoModel.create(promoActual);
     }
     // COMPARACIÓN
@@ -185,15 +201,14 @@ async function buscarPromo(esPrueba = false) {
       if (promoActual.idImagen !== ultimaPromoDB.idImagen) {
         console.log("🎨 Cambio de Banner -> Enviando FULL");
         await enviarTelegram(promoActual, "FULL");
-        // Actualizamos el registro único en la DB
         await PromoModel.updateOne({}, promoActual);
       }
       // B. Cambio de Texto
       else if (promoActual.textoCintillo !== ultimaPromoDB.textoCintillo) {
+         // Verificación extra para no enviar vacíos
          if (promoActual.textoCintillo && promoActual.textoCintillo.length > 2) {
             console.log("⚡ Cambio de Cintillo -> Enviando TEXTO");
             await enviarTelegram(promoActual, "TEXT_ONLY");
-            // Actualizamos DB
             await PromoModel.updateOne({}, promoActual);
          }
       } 
@@ -203,17 +218,18 @@ async function buscarPromo(esPrueba = false) {
     }
 
   } catch (error) {
-    console.error("Error general:", error);
+    console.error("Error general en el proceso:", error);
   } finally {
     if (browser) await browser.close();
-    // No cerramos conexión a Mongo para mantenerla viva en el loop
   }
 }
 
 // ---------------------------
 // Ejecución
 // ---------------------------
-buscarPromo(false); // Inicia en modo monitor
+
+// Iniciamos en modo monitor (false)
+buscarPromo(false); 
 
 // Intervalo cada 1 hora (3600000 ms)
 setInterval(() => buscarPromo(false), 3600000);
