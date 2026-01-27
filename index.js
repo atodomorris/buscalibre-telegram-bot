@@ -16,50 +16,48 @@ if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
 }
 
 // ---------------------------
-// 1. Fusión de Imágenes en Cloudinary
+// 1. Fusión de Imágenes en Cloudinary (CORREGIDO TAMAÑO)
 // ---------------------------
 function crearImagenFusionada(urlBase, urlDetalle) {
   if (!urlBase) return null;
-  if (!urlDetalle) return urlBase; // Si falla el PNG, manda al menos el fondo
+  if (!urlDetalle) return urlBase; 
 
-  // Cloudinary necesita la URL de la capa superior en Base64 para usarla como overlay
   const urlDetalleB64 = Buffer.from(urlDetalle).toString('base64')
-    .replace(/\+/g, '-') // Ajuste para URL Safe de Cloudinary
+    .replace(/\+/g, '-') 
     .replace(/\//g, '_')
     .replace(/=+$/, '');
 
-  // Estructura: BaseURL + Transformación (Overlay centrada) + NombreArchivo
-  // l_fetch: pone una imagen remota encima
-  // fl_layer_apply: aplica la capa
-  // g_center: centra la capa respecto al fondo
+  // AJUSTE: w_1.0,fl_relative obliga a la capa superior a tener el mismo ancho que la base
   return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/` +
-         `l_fetch:${urlDetalleB64}/fl_layer_apply,g_center/` +
-         `q_auto,f_jpg/` + // Calidad auto y formato final JPG
+         `l_fetch:${urlDetalleB64}/fl_layer_apply,g_center,fl_relative,w_1.0/` +
+         `q_auto,f_jpg/` + 
          urlBase;
 }
 
 // ---------------------------
-// 2. Enviar a Telegram
+// 2. Enviar a Telegram (CORREGIDO BOTÓN Y TEXTO)
 // ---------------------------
 async function enviarTelegram(promo, tipoMensaje) {
-  let mensaje = "";
   
-  // Título: Usamos el CINTILLO como texto principal ahora
-  const titulo = promo.textoCintillo 
-    ? `🚨 <b>${promo.textoCintillo.toUpperCase()}</b>` 
-    : `🚨 <b>NUEVA PROMO DETECTADA</b>`;
+  // LÓGICA DE TÍTULO:
+  // Si hay cintillo, usa ese texto. Si no, usa el fallback con el signo "!" asegurado.
+  let textoPrincipal = promo.textoCintillo && promo.textoCintillo.length > 5
+    ? promo.textoCintillo.toUpperCase()
+    : "🚨 NUEVA PROMO DETECTADA!"; // Fallback con signo !
 
-  // Construimos el mensaje base
-  mensaje += `${titulo}\n\n`;
-  mensaje += `👉 <a href="${promo.link}">Ver Ofertas</a>`;
+  // Aseguramos que el texto no tenga espacios extra
+  textoPrincipal = textoPrincipal.trim();
 
-  // Lógica: ¿Enviamos foto o solo texto?
+  // Construimos el mensaje (Todo en negritas)
+  // Nota: Eliminamos el link de texto "Ver Ofertas" de aquí porque irá en el botón
+  let mensaje = `<b>${textoPrincipal}</b>`;
+
+  // Añadimos la imagen invisible al final si es modo FULL
   if (tipoMensaje === "FULL" && promo.imagenFusionada) {
-    // Truco: Ponemos la imagen en un link invisible al final para que Telegram la renderice
     mensaje += `<a href="${promo.imagenFusionada}">&#8205;</a>`;
-    console.log("📤 Enviando Alerta COMPLETA (Imagen + Texto)...");
+    console.log("📤 Preparando envío: Imagen + Texto + Botón...");
   } else {
-    console.log("📤 Enviando Alerta FLASH (Solo Texto)...");
+    console.log("📤 Preparando envío: Solo Texto + Botón...");
   }
 
   try {
@@ -69,7 +67,13 @@ async function enviarTelegram(promo, tipoMensaje) {
         chat_id: TELEGRAM_CHAT_ID,
         text: mensaje,
         parse_mode: "HTML",
-        disable_web_page_preview: false // Importante: false para que se vea la imagen
+        disable_web_page_preview: false, // Necesario para que se vea la imagen
+        // AJUSTE: Botón nativo de Telegram
+        reply_markup: JSON.stringify({
+          inline_keyboard: [[
+            { text: "🚀 Ver Ofertas", url: promo.link }
+          ]]
+        })
       }),
       { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
@@ -94,60 +98,66 @@ async function buscarPromo(enviarMensajePrueba = false) {
     const page = await browser.newPage();
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
     
+    // Vamos a la home
     await page.goto("https://www.buscalibre.cl", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("body", { timeout: 20000 });
-    
-    // Espera extra para asegurar carga de estilos
     await new Promise(resolve => setTimeout(resolve, 3000));
 
     const datosScraped = await page.evaluate(() => {
-      // A. Buscar CAPA DETALLE (PNG)
+      // --- A. Extracción del Cintillo (Mejorada) ---
+      // Buscamos directamente el contenedor .avisoTop
+      const avisoTop = document.querySelector(".avisoTop");
+      let textoCintillo = "";
+      let linkCintillo = null;
+
+      if (avisoTop) {
+        // Obtenemos todo el texto visible del bloque
+        let rawText = avisoTop.innerText || "";
+        // Limpiamos "Ver más" y espacios
+        textoCintillo = rawText.replace(/Ver más/gi, "").trim();
+        
+        // Buscamos el link ahí mismo
+        const enlace = avisoTop.querySelector("a");
+        if (enlace) linkCintillo = enlace.href;
+      }
+
+      // --- B. Extracción del Banner ---
       const imgFrontal = document.querySelector("section#portadaHome img[alt]");
       
-      // B. Buscar CAPA BASE (JPG - Background)
-      // Buscamos el contenedor padre que tenga 'background-image'
       let bgUrl = null;
       if (imgFrontal) {
         const contenedor = imgFrontal.closest("div[style*='background-image']");
         if (contenedor) {
           const style = contenedor.getAttribute('style');
-          // Regex para extraer la url dentro de url('...')
           const match = style.match(/url\(\s*['"]?(.*?)['"]?\s*\)/);
           if (match) bgUrl = match[1];
         }
       }
 
-      // C. Buscar CINTILLO (Texto superior)
-      const cintilloEl = document.querySelector(".avisoTop p");
-      let textoCintillo = cintilloEl ? cintilloEl.innerText.trim() : "";
-      
-      // Limpieza básica del texto cintillo
-      if(textoCintillo.includes("Ver más")) {
-        textoCintillo = textoCintillo.replace("Ver más", "").trim();
-      }
-
-      const link = imgFrontal?.closest("a");
+      const linkBanner = imgFrontal?.closest("a")?.href;
 
       return {
         pngUrl: imgFrontal?.src || "",
-        jpgUrl: bgUrl || "", // La URL del fondo
-        textoCintillo: textoCintillo,
-        link: link ? link.href : "https://www.buscalibre.cl"
+        jpgUrl: bgUrl || "",
+        textoCintillo: textoCintillo, 
+        link: linkCintillo || linkBanner || "https://www.buscalibre.cl"
       };
     });
 
-    // Generar la URL fusionada
+    // Debug: Ver qué texto capturó
+    console.log("Texto detectado en cintillo:", datosScraped.textoCintillo);
+
+    // Generar URL fusionada
     const imagenFusionada = crearImagenFusionada(datosScraped.jpgUrl, datosScraped.pngUrl);
 
-    // Objeto final para comparar
     const promoActual = {
-      idImagen: datosScraped.pngUrl, // Usamos la URL del PNG como ID único de la imagen visual
-      texto: datosScraped.textoCintillo,
+      idImagen: datosScraped.pngUrl, 
+      textoCintillo: datosScraped.textoCintillo,
       link: datosScraped.link,
       imagenFusionada: imagenFusionada
     };
 
-    // --- LÓGICA DE COMPARACIÓN ---
+    // --- COMPARACIÓN ---
     const archivoPromo = "ultimaPromo.json";
     let ultimaPromo = {};
 
@@ -155,25 +165,25 @@ async function buscarPromo(enviarMensajePrueba = false) {
       ultimaPromo = JSON.parse(fs.readFileSync(archivoPromo, "utf-8"));
     }
 
-    // Modo PRUEBA
     if (enviarMensajePrueba) {
-      await enviarTelegram(promoActual, "FULL"); // En prueba forzamos full
+      // PRUEBA: Forzamos envío FULL
+      await enviarTelegram(promoActual, "FULL"); 
     } 
     else {
-      // CASO 1: Cambió la IMAGEN (Campaña nueva grande) -> Enviar FULL
+      // 1. Cambio visual grande -> FULL
       if (promoActual.idImagen !== ultimaPromo.idImagen) {
-        console.log("aaa ¡Cambio de Banner detectado!");
+        console.log("🎨 ¡Cambio de Banner detectado!");
         await enviarTelegram(promoActual, "FULL");
         fs.writeFileSync(archivoPromo, JSON.stringify(promoActual, null, 2), "utf-8");
       } 
-      // CASO 2: La imagen es igual, pero cambió el TEXTO (Promo Relámpago) -> Enviar TEXTO
-      else if (promoActual.texto !== ultimaPromo.texto && promoActual.texto !== "") {
-        console.log("⚡ ¡Cambio de Cintillo detectado (Flash)!");
+      // 2. Mismo banner, nuevo texto (flash) -> TEXT_ONLY
+      else if (promoActual.textoCintillo !== ultimaPromo.textoCintillo && promoActual.textoCintillo !== "") {
+        console.log("⚡ ¡Cambio de Cintillo detectado!");
         await enviarTelegram(promoActual, "TEXT_ONLY");
         fs.writeFileSync(archivoPromo, JSON.stringify(promoActual, null, 2), "utf-8");
       } 
       else {
-        console.log("ℹ️ Sin cambios relevantes.");
+        console.log("ℹ️ Sin cambios.");
       }
     }
 
@@ -187,8 +197,5 @@ async function buscarPromo(enviarMensajePrueba = false) {
 // ---------------------------
 // Ejecución
 // ---------------------------
-// Si pasas 'true' hace un envío de prueba inmediato
 buscarPromo(true); 
-
-// Intervalo cada 1 hora
 setInterval(() => buscarPromo(false), 3600000);
