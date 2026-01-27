@@ -4,7 +4,7 @@ const fs = require("fs");
 const qs = require("qs");
 
 // ---------------------------
-// Función para limpiar caracteres raros
+// Limpieza de caracteres raros
 // ---------------------------
 function limpiarTexto(texto) {
   if (!texto) return texto;
@@ -40,7 +40,7 @@ const CLOUD_NAME = "dvye0cje6";
 const COLOR_FONDO = "fe8d10"; // naranja
 
 // ---------------------------
-// Cloudinary: canvas fijo 1000x327 centrado
+// Cloudinary: 1000x327 centrado
 // ---------------------------
 function cloudinaryFetch(urlOriginal) {
   if (!urlOriginal) return urlOriginal;
@@ -55,35 +55,23 @@ function cloudinaryFetch(urlOriginal) {
 }
 
 // ---------------------------
-// Enviar TEXTO
+// Envío UN SOLO mensaje (texto + preview + botón)
 // ---------------------------
-async function enviarTextoTelegram(promo) {
+async function enviarTelegram(promo) {
+  const imagen = cloudinaryFetch(promo.imagen);
+
   const mensaje =
     `🚨 *NUEVA PROMO DETECTADA!*\n\n` +
-    `*${promo.texto.toUpperCase()}*`;
+    `*${promo.texto.toUpperCase()}*\n\n` +
+    `${imagen}`; // <- genera preview debajo del texto
 
   await axios.post(
     `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
     qs.stringify({
       chat_id: TELEGRAM_CHAT_ID,
       text: mensaje,
-      parse_mode: "Markdown"
-    }),
-    { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-  );
-}
-
-// ---------------------------
-// Enviar IMAGEN + BOTÓN
-// ---------------------------
-async function enviarImagenTelegram(promo) {
-  const urlTransformada = cloudinaryFetch(promo.imagen);
-
-  await axios.post(
-    `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`,
-    qs.stringify({
-      chat_id: TELEGRAM_CHAT_ID,
-      photo: urlTransformada,
+      parse_mode: "Markdown",
+      disable_web_page_preview: false,
       reply_markup: JSON.stringify({
         inline_keyboard: [[
           { text: "🚀 Ver Ofertas", url: promo.link }
@@ -92,19 +80,12 @@ async function enviarImagenTelegram(promo) {
     }),
     { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
   );
+
+  console.log("✅ Promo enviada en UN solo mensaje");
 }
 
 // ---------------------------
-// Flujo combinado
-// ---------------------------
-async function enviarPromoTelegram(promo) {
-  await enviarTextoTelegram(promo);
-  await enviarImagenTelegram(promo);
-  console.log("✅ Promo enviada a Telegram");
-}
-
-// ---------------------------
-// Función principal
+// Scraping principal
 // ---------------------------
 async function buscarPromo(enviarMensajePrueba = false) {
   console.log("🔎 Buscando promo -", new Date().toLocaleString());
@@ -129,7 +110,9 @@ async function buscarPromo(enviarMensajePrueba = false) {
 
     return {
       texto: img?.alt || "SIN TEXTO",
-      link: link ? "https://www.buscalibre.cl" + link.getAttribute("href") : "SIN LINK",
+      link: link
+        ? "https://www.buscalibre.cl" + link.getAttribute("href")
+        : "SIN LINK",
       imagen: img?.src || "SIN IMAGEN"
     };
   });
@@ -145,12 +128,12 @@ async function buscarPromo(enviarMensajePrueba = false) {
 
   if (enviarMensajePrueba) {
     console.log("📤 Enviando mensaje de prueba...");
-    await enviarPromoTelegram(promo);
+    await enviarTelegram(promo);
   }
 
   if (!ultimaPromo || JSON.stringify(ultimaPromo) !== JSON.stringify(promo)) {
     if (!enviarMensajePrueba) {
-      await enviarPromoTelegram(promo);
+      await enviarTelegram(promo);
     }
     fs.writeFileSync(archivoPromo, JSON.stringify(promo, null, 2), "utf-8");
   } else {
