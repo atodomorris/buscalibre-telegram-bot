@@ -23,6 +23,16 @@ function limpiarTexto(texto) {
 }
 
 // ---------------------------
+// Texto seguro para Telegram
+// ---------------------------
+function textoSeguro(texto) {
+  if (!texto || !texto.trim()) {
+    return "Nueva promoción disponible en Buscalibre";
+  }
+  return texto.toUpperCase();
+}
+
+// ---------------------------
 // Variables de entorno Telegram
 // ---------------------------
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -62,7 +72,7 @@ async function enviarTelegram(promo) {
 
   const mensaje =
     `🚨 NUEVA PROMO DETECTADA!\n\n` +
-    `${promo.texto.toUpperCase()}\n\n` +
+    `${textoSeguro(promo.texto)}\n\n` +
     `${imagen}`;
 
   await axios.post(
@@ -108,11 +118,11 @@ async function buscarPromo(enviarMensajePrueba = false) {
     const link = img?.closest("a");
 
     return {
-      texto: img?.alt || "SIN TEXTO",
+      texto: img?.alt || "",
       link: link
         ? "https://www.buscalibre.cl" + link.getAttribute("href")
-        : "SIN LINK",
-      imagen: img?.src || "SIN IMAGEN"
+        : "https://www.buscalibre.cl",
+      imagen: img?.src || ""
     };
   });
 
