@@ -65,7 +65,7 @@ function cloudinaryFetch(urlOriginal) {
 }
 
 // ---------------------------
-// Envío UN SOLO mensaje (texto + preview + botón)
+// Envío UN SOLO mensaje (texto + imagen preview invisible + botón)
 // ---------------------------
 async function enviarTelegram(promo) {
   const imagen = cloudinaryFetch(promo.imagen);
@@ -73,13 +73,14 @@ async function enviarTelegram(promo) {
   const mensaje =
     `🚨 NUEVA PROMO DETECTADA!\n\n` +
     `${textoSeguro(promo.texto)}\n\n` +
-    `${imagen}`;
+    `<a href="${imagen}">&#8205;</a>`;
 
   await axios.post(
     `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
     qs.stringify({
       chat_id: TELEGRAM_CHAT_ID,
       text: mensaje,
+      parse_mode: "HTML",
       disable_web_page_preview: false,
       reply_markup: JSON.stringify({
         inline_keyboard: [[
@@ -90,7 +91,7 @@ async function enviarTelegram(promo) {
     { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
   );
 
-  console.log("✅ Promo enviada correctamente");
+  console.log("✅ Promo enviada (link invisible)");
 }
 
 // ---------------------------
