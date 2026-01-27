@@ -65,16 +65,17 @@ function cloudinaryFetch(urlOriginal) {
 }
 
 // ---------------------------
-// Envío UN SOLO mensaje (Mejorado: Negrita + Sin espacio extra)
+// Envío UN SOLO mensaje (Ajustado: Negritas + Espacio Título/Cuerpo + Sin espacio Cuerpo/Imagen)
 // ---------------------------
 async function enviarTelegram(promo) {
   const imagen = cloudinaryFetch(promo.imagen);
 
-  // MODIFICACIÓN:
-  // 1. Se añaden etiquetas <b> para negrita.
-  // 2. Se reduce el espaciado (\n) antes de la etiqueta <a> para quitar el hueco blanco.
+  // AJUSTE REALIZADO:
+  // 1. Título en negrita + \n\n (para dejar una línea vacía de separación).
+  // 2. Cuerpo en negrita.
+  // 3. Imagen pegada inmediatamente después (sin \n) para que no quede hueco abajo.
   const mensaje =
-    `<b>🚨 NUEVA PROMO DETECTADA!</b>\n` +
+    `<b>🚨 NUEVA PROMO DETECTADA!</b>\n\n` +
     `<b>${textoSeguro(promo.texto)}</b>` +
     `<a href="${imagen}">&#8205;</a>`;
 
@@ -94,7 +95,7 @@ async function enviarTelegram(promo) {
     { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
   );
 
-  console.log("✅ Promo enviada (link invisible optimizado)");
+  console.log("✅ Promo enviada (formato visual corregido)");
 }
 
 // ---------------------------
