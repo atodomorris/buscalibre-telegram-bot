@@ -1,19 +1,33 @@
 const puppeteer = require("puppeteer");
 const axios = require("axios");
-const fs = require("fs");
 const qs = require("qs");
+const mongoose = require("mongoose");
 
 // ---------------------------
-// Configuración
+// Configuración y Variables
 // ---------------------------
 const CLOUD_NAME = "dvye0cje6";
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const MONGO_URI = process.env.MONGO_URI; // <--- NUEVA VARIABLE OBLIGATORIA
 
-if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
-  console.error("❌ ERROR: Variables TELEGRAM no definidas.");
+if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID || !MONGO_URI) {
+  console.error("❌ ERROR: Faltan variables de entorno (Telegram o Mongo).");
   process.exit(1);
 }
+
+// ---------------------------
+// Configuración Mongoose (Base de Datos)
+// ---------------------------
+const promoSchema = new mongoose.Schema({
+  idImagen: String,
+  textoCintillo: String,
+  link: String,
+  imagenFusionada: String,
+  fecha: { type: Date, default: Date.now }
+});
+
+const PromoModel = mongoose.model("PromoBuscalibre", promoSchema);
 
 // ---------------------------
 // 1. Fusión de Imágenes
@@ -71,24 +85,30 @@ async function enviarTelegram(promo, tipoMensaje) {
 }
 
 // ---------------------------
-// 3. Scraping y Lógica
+// 3. Scraping y Lógica Principal
 // ---------------------------
 async function buscarPromo(esPrueba = false) {
-  console.log("🔎 Buscando promo en Buscalibre...", new Date().toLocaleString());
+  console.log("🔎 Buscando cambios (Modo Mongo)...", new Date().toLocaleString());
+
+  // Conectar a Mongo si no estamos conectados
+  if (mongoose.connection.readyState === 0) {
+    await mongoose.connect(MONGO_URI);
+    console.log("💾 Conectado a MongoDB.");
+  }
 
   const browser = await puppeteer.launch({
     headless: "new",
     args: [
       "--no-sandbox", 
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage", // Importante para Railway (memoria)
-      "--single-process" // Ahorra recursos
+      "--disable-setuid-sandbox", 
+      "--disable-dev-shm-usage",
+      "--single-process"
     ]
   });
 
   try {
     const page = await browser.newPage();
-    // Bloqueamos carga de recursos pesados innecesarios (imágenes, fuentes) para ir más rápido
+    // Bloqueo de recursos para velocidad
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
@@ -99,11 +119,9 @@ async function buscarPromo(esPrueba = false) {
     });
 
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
-    
-    // Vamos a la home
     await page.goto("https://www.buscalibre.cl", { waitUntil: "domcontentloaded", timeout: 30000 });
-    
-    // Extraemos los datos (Script ligero)
+
+    // --- SCRAPING ---
     const datosScraped = await page.evaluate(() => {
       const avisoTop = document.querySelector(".avisoTop");
       let texto = "";
@@ -145,48 +163,42 @@ async function buscarPromo(esPrueba = false) {
       imagenFusionada: imagenFusionada
     };
 
-    // --- LÓGICA INTELIGENTE (SILENT START) ---
-    const archivoPromo = "ultimaPromo.json";
-    let ultimaPromo = null;
+    // --- LÓGICA DE BASE DE DATOS ---
+    
+    // 1. Buscamos la última promo guardada en la DB
+    const ultimaPromoDB = await PromoModel.findOne();
 
-    if (fs.existsSync(archivoPromo)) {
-      try {
-        ultimaPromo = JSON.parse(fs.readFileSync(archivoPromo, "utf-8"));
-      } catch (e) {
-        console.log("⚠️ Error leyendo JSON, se reiniciará.");
-      }
-    }
-
-    // 1. MODO PRUEBA MANUAL (Forzado)
+    // MODO PRUEBA
     if (esPrueba) {
       console.log("🧪 Modo Prueba: Enviando mensaje forzado.");
       await enviarTelegram(promoActual, "FULL");
-    } 
-    // 2. PRIMERA EJECUCIÓN O REINICIO (Sin memoria previa)
-    else if (!ultimaPromo) {
-      console.log("🆕 Inicio del sistema (o reinicio de Railway).");
-      console.log("💾 Guardando estado actual sin enviar alerta (SILENT START).");
-      // Guardamos la promo actual para tener una base de comparación, pero NO enviamos mensaje.
-      fs.writeFileSync(archivoPromo, JSON.stringify(promoActual, null, 2), "utf-8");
     }
-    // 3. MODO MONITOR (Comparación normal)
+    // PRIMERA VEZ (Base de datos vacía)
+    else if (!ultimaPromoDB) {
+      console.log("🆕 Base de datos vacía. Guardando estado inicial (Silent Start).");
+      // Creamos el primer registro sin notificar para evitar spam al deployar
+      await PromoModel.create(promoActual);
+    }
+    // COMPARACIÓN
     else {
-      // A. Cambio de IMAGEN
-      if (promoActual.idImagen !== ultimaPromo.idImagen) {
+      // A. Cambio de Banner
+      if (promoActual.idImagen !== ultimaPromoDB.idImagen) {
         console.log("🎨 Cambio de Banner -> Enviando FULL");
         await enviarTelegram(promoActual, "FULL");
-        fs.writeFileSync(archivoPromo, JSON.stringify(promoActual, null, 2), "utf-8");
-      } 
-      // B. Cambio de TEXTO
-      else if (promoActual.textoCintillo !== ultimaPromo.textoCintillo) {
-        if (promoActual.textoCintillo && promoActual.textoCintillo.length > 2) {
-          console.log("⚡ Cambio de Cintillo -> Enviando TEXTO");
-          await enviarTelegram(promoActual, "TEXT_ONLY");
-          fs.writeFileSync(archivoPromo, JSON.stringify(promoActual, null, 2), "utf-8");
-        }
+        // Actualizamos el registro único en la DB
+        await PromoModel.updateOne({}, promoActual);
+      }
+      // B. Cambio de Texto
+      else if (promoActual.textoCintillo !== ultimaPromoDB.textoCintillo) {
+         if (promoActual.textoCintillo && promoActual.textoCintillo.length > 2) {
+            console.log("⚡ Cambio de Cintillo -> Enviando TEXTO");
+            await enviarTelegram(promoActual, "TEXT_ONLY");
+            // Actualizamos DB
+            await PromoModel.updateOne({}, promoActual);
+         }
       } 
       else {
-        console.log("💤 Sin cambios.");
+        console.log("💤 Sin cambios relevantes.");
       }
     }
 
@@ -194,18 +206,14 @@ async function buscarPromo(esPrueba = false) {
     console.error("Error general:", error);
   } finally {
     if (browser) await browser.close();
+    // No cerramos conexión a Mongo para mantenerla viva en el loop
   }
 }
 
 // ---------------------------
 // Ejecución
 // ---------------------------
+buscarPromo(false); // Inicia en modo monitor
 
-// IMPORTANTE:
-// He cambiado esto a 'false'. 
-// Al arrancar en Railway, ejecutará el modo "Silent Start" (Guardar sin avisar).
-// Solo te avisará cuando la promo cambie REALMENTE en el futuro.
-buscarPromo(false); 
-
-// Intervalo cada 1 hora
+// Intervalo cada 1 hora (3600000 ms)
 setInterval(() => buscarPromo(false), 3600000);
