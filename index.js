@@ -4,232 +4,155 @@ const qs = require("qs");
 const mongoose = require("mongoose");
 
 // ---------------------------
-// Configuración y Variables
+// Configuración
 // ---------------------------
 const CLOUD_NAME = "dvye0cje6";
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const MONGO_URI = process.env.MONGO_URI;
 
-// --- INICIO DIAGNÓSTICO DE VARIABLES ---
-console.log("🔍 --- INICIANDO REVISIÓN DE VARIABLES ---");
-console.log(`1. TELEGRAM_TOKEN:   ${TELEGRAM_TOKEN ? "✅ CORRECTO" : "❌ FALTA (Revisa si está vacía o mal escrita)"}`);
-console.log(`2. TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID ? "✅ CORRECTO" : "❌ FALTA (Revisa si está vacía o mal escrita)"}`);
-console.log(`3. MONGO_URI:        ${MONGO_URI ? "✅ CORRECTO" : "❌ FALTA (Revisa si está vacía o mal escrita)"}`);
-console.log("------------------------------------------");
-// --- FIN DIAGNÓSTICO ---
+// Diagnóstico
+console.log("🔍 --- REVISIÓN VARIABLES ---");
+console.log(`1. TOKEN: ${TELEGRAM_TOKEN ? "✅" : "❌"}`);
+console.log(`2. CHAT_ID: ${TELEGRAM_CHAT_ID ? "✅" : "❌"}`);
+console.log(`3. MONGO: ${MONGO_URI ? "✅" : "❌"}`);
 
 if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID || !MONGO_URI) {
-  console.error("🔥 ERROR FATAL: El bot se detendrá porque falta una variable marcada con ❌ arriba.");
   process.exit(1);
 }
 
 // ---------------------------
-// Configuración Mongoose (Base de Datos)
+// Base de Datos (Modelo Estándar)
 // ---------------------------
 const promoSchema = new mongoose.Schema({
   idImagen: String,
   textoCintillo: String,
+  textoOriginalBanner: String, // La identidad real de la promo
   link: String,
   imagenFusionada: String,
   fecha: { type: Date, default: Date.now }
 });
 
-// Crea la colección "promobuscalibres" automáticamente
 const PromoModel = mongoose.model("PromoBuscalibre", promoSchema);
 
 // ---------------------------
-// 1. Fusión de Imágenes
+// Funciones
 // ---------------------------
 function crearImagenFusionada(urlBase, urlDetalle) {
-  if (!urlBase) return null;
-  if (!urlDetalle) return urlBase;
-
-  const urlDetalleB64 = Buffer.from(urlDetalle).toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-
-  return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/` +
-         `l_fetch:${urlDetalleB64}/fl_layer_apply,g_center/` +
-         `q_auto,f_jpg/` +
-         urlBase;
+  if (!urlBase || !urlDetalle) return null;
+  const urlDetalleB64 = Buffer.from(urlDetalle).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/l_fetch:${urlDetalleB64}/fl_layer_apply,g_center/q_auto,f_jpg/${urlBase}`;
 }
 
-// ---------------------------
-// 2. Enviar a Telegram
-// ---------------------------
 async function enviarTelegram(promo, tipoMensaje) {
   let mensaje = `🚨 <b>NUEVA PROMO DETECTADA!</b>\n\n`;
-
-  const textoCintillo = promo.textoCintillo || "Revisa las ofertas en la web";
-  mensaje += `<b>${textoCintillo}</b>`;
+  mensaje += `<b>${promo.textoCintillo || "Revisa la web"}</b>`;
 
   if (tipoMensaje === "FULL" && promo.imagenFusionada) {
     mensaje += `<a href="${promo.imagenFusionada}">&#8205;</a>`;
   }
 
-  const teclado = {
-    inline_keyboard: [[
-      { text: "🚀 Ver Ofertas", url: promo.link }
-    ]]
-  };
-
   try {
-    await axios.post(
-      `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-      qs.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text: mensaje,
-        parse_mode: "HTML",
-        disable_web_page_preview: false,
-        reply_markup: JSON.stringify(teclado)
-      }),
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    );
-    console.log("✅ Mensaje enviado a Telegram.");
-  } catch (error) {
-    console.error("❌ Error enviando a Telegram:", error.message);
-  }
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, qs.stringify({
+      chat_id: TELEGRAM_CHAT_ID,
+      text: mensaje,
+      parse_mode: "HTML",
+      disable_web_page_preview: false,
+      reply_markup: JSON.stringify({ inline_keyboard: [[{ text: "🚀 Ver Ofertas", url: promo.link }]] })
+    }));
+    console.log(`✅ Enviado: ${tipoMensaje}`);
+  } catch (e) { console.error("❌ Error Telegram:", e.message); }
 }
 
 // ---------------------------
-// 3. Scraping y Lógica Principal
+// Lógica Principal
 // ---------------------------
 async function buscarPromo(esPrueba = false) {
-  console.log("🔎 Buscando cambios (Modo Mongo)...", new Date().toLocaleString());
+  console.log("🔎 Buscando...", new Date().toLocaleString());
 
-  // Conectar a Mongo si no estamos conectados
-  if (mongoose.connection.readyState === 0) {
-    try {
-      await mongoose.connect(MONGO_URI);
-      console.log("💾 Conectado a MongoDB exitosamente.");
-    } catch (err) {
-      console.error("❌ Error conectando a MongoDB:", err.message);
-      return; // Detener si no hay base de datos
-    }
-  }
+  if (mongoose.connection.readyState === 0) await mongoose.connect(MONGO_URI);
 
   const browser = await puppeteer.launch({
     headless: "new",
-    args: [
-      "--no-sandbox", 
-      "--disable-setuid-sandbox", 
-      "--disable-dev-shm-usage",
-      "--single-process"
-    ]
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--single-process"]
   });
 
   try {
     const page = await browser.newPage();
-    // Bloqueo de recursos para velocidad
     await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
+    page.on('request', r => ['font', 'stylesheet'].includes(r.resourceType()) ? r.abort() : r.continue());
     
-    // Timeout aumentado a 60s por si la red es lenta
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
     await page.goto("https://www.buscalibre.cl", { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // --- SCRAPING ---
-    const datosScraped = await page.evaluate(() => {
-      const avisoTop = document.querySelector(".avisoTop");
-      let texto = "";
-      let linkCintillo = null;
-
-      if (avisoTop) {
-        texto = avisoTop.innerText || "";
-        texto = texto.replace(/Ver más/gi, "").trim();
-        const enlace = avisoTop.querySelector("a");
-        if (enlace) linkCintillo = enlace.href;
-      }
-
-      const imgFrontal = document.querySelector("section#portadaHome img[alt]");
-      let bgUrl = null;
-      if (imgFrontal) {
-        const contenedor = imgFrontal.closest("div[style*='background-image']");
-        if (contenedor) {
-          const style = contenedor.getAttribute('style');
-          const match = style.match(/url\(\s*['"]?(.*?)['"]?\s*\)/);
-          if (match) bgUrl = match[1];
-        }
-      }
-      const linkBanner = imgFrontal?.closest("a")?.href;
-
+    const datos = await page.evaluate(() => {
+      const aviso = document.querySelector(".avisoTop");
+      let txt = aviso ? aviso.innerText.replace(/Ver más/gi, "").trim() : "";
+      let link = aviso ? aviso.querySelector("a")?.href : null;
+      
+      const img = document.querySelector("section#portadaHome img[alt]");
+      const bg = img ? img.closest("div[style*='background-image']")?.getAttribute('style')?.match(/url\(\s*['"]?(.*?)['"]?\s*\)/)?.[1] : "";
+      
       return {
-        pngUrl: imgFrontal?.src || "",
-        jpgUrl: bgUrl || "",
-        textoCintillo: texto,
-        link: linkCintillo || linkBanner || "https://www.buscalibre.cl"
+        pngUrl: img && img.src.startsWith('http') ? img.src : "",
+        jpgUrl: bg || "",
+        texto: txt,
+        link: link || img?.closest("a")?.href || "https://www.buscalibre.cl"
       };
     });
 
-    const imagenFusionada = crearImagenFusionada(datosScraped.jpgUrl, datosScraped.pngUrl);
-
     const promoActual = {
-      idImagen: datosScraped.pngUrl,
-      textoCintillo: datosScraped.textoCintillo,
-      link: datosScraped.link,
-      imagenFusionada: imagenFusionada
+      idImagen: datos.pngUrl,
+      textoCintillo: datos.texto,
+      link: datos.link,
+      imagenFusionada: crearImagenFusionada(datos.jpgUrl, datos.pngUrl)
     };
 
-    // --- LÓGICA DE BASE DE DATOS ---
-    
-    // 1. Buscamos la última promo guardada en la DB
-    const ultimaPromoDB = await PromoModel.findOne();
+    const ultimaDB = await PromoModel.findOne();
 
-    // MODO PRUEBA
     if (esPrueba) {
-      console.log("🧪 Modo Prueba: Enviando mensaje forzado.");
       await enviarTelegram(promoActual, "FULL");
     }
-    // PRIMERA VEZ (Base de datos vacía)
-    else if (!ultimaPromoDB) {
-      console.log("🆕 Base de datos vacía. Guardando estado inicial (Silent Start).");
-      // Guardamos sin notificar
-      await PromoModel.create(promoActual);
+    // --- AQUÍ OCURRE LA MAGIA DEL REINICIO ---
+    else if (!ultimaDB) {
+      console.log("🆕 Inicio Limpio. Guardando Original.");
+      // Guardamos la promo actual como la "Original"
+      await PromoModel.create({ ...promoActual, textoOriginalBanner: promoActual.textoCintillo });
     }
-    // COMPARACIÓN
     else {
-      // A. Cambio de Banner
-      if (promoActual.idImagen !== ultimaPromoDB.idImagen) {
-        console.log("🎨 Cambio de Banner -> Enviando FULL");
-        await enviarTelegram(promoActual, "FULL");
-        await PromoModel.updateOne({}, promoActual);
-      }
-      // B. Cambio de Texto
-      else if (promoActual.textoCintillo !== ultimaPromoDB.textoCintillo) {
-         // Verificación extra para no enviar vacíos
-         if (promoActual.textoCintillo && promoActual.textoCintillo.length > 2) {
-            console.log("⚡ Cambio de Cintillo -> Enviando TEXTO");
-            await enviarTelegram(promoActual, "TEXT_ONLY");
-            await PromoModel.updateOne({}, promoActual);
-         }
+      const cambioImg = promoActual.idImagen !== ultimaDB.idImagen;
+      const cambioTxt = promoActual.textoCintillo !== ultimaDB.textoCintillo;
+      const hayVisual = promoActual.idImagen && promoActual.idImagen.length > 10;
+
+      if (cambioImg) {
+        if (hayVisual) {
+          console.log("🎨 Cambio Banner -> FULL");
+          await enviarTelegram(promoActual, "FULL");
+          await PromoModel.updateOne({}, { ...promoActual, textoOriginalBanner: promoActual.textoCintillo });
+        } else {
+          console.log("⚠️ Sin Banner -> TEXTO");
+          await enviarTelegram(promoActual, "TEXT_ONLY");
+          await PromoModel.updateOne({}, promoActual);
+        }
+      } 
+      else if (cambioTxt) {
+        // LÓGICA DE RETORNO
+        if (promoActual.textoCintillo === ultimaDB.textoOriginalBanner) {
+           console.log("🔄 Retorno a Original -> FULL");
+           await enviarTelegram(promoActual, "FULL");
+        } else {
+           console.log("⚡ Relámpago -> TEXTO");
+           await enviarTelegram(promoActual, "TEXT_ONLY");
+        }
+        await PromoModel.updateOne({}, { $set: { textoCintillo: promoActual.textoCintillo, link: promoActual.link } });
       } 
       else {
-        console.log("💤 Sin cambios relevantes.");
+        console.log("💤 Sin cambios");
       }
     }
 
-  } catch (error) {
-    console.error("Error general en el proceso:", error);
-  } finally {
-    if (browser) await browser.close();
-  }
+  } catch (e) { console.error(e); } finally { if (browser) await browser.close(); }
 }
 
-// ---------------------------
-// Ejecución
-// ---------------------------
-
-// Iniciamos en modo monitor (false)
 buscarPromo(false); 
-
-// Intervalo cada 1 hora (3600000 ms)
 setInterval(() => buscarPromo(false), 3600000);
