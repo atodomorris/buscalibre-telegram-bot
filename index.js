@@ -1,8 +1,4 @@
 const http = require("http");
-const path = require("path");
-
-process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || path.join(__dirname, ".cache", "puppeteer");
-
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 const qs = require("qs");
@@ -30,7 +26,6 @@ console.log(`2. CHAT_ID: ${TELEGRAM_CHAT_ID ? "✅" : "❌"}`);
 console.log(`3. MONGO: ${MONGO_URI ? "✅" : "❌"}`);
 console.log(`4. PORT: ${PORT}`);
 console.log(`5. CHECK_INTERVAL_MINUTES: ${CHECK_INTERVAL_MINUTES}`);
-console.log(`6. PUPPETEER_CACHE_DIR: ${process.env.PUPPETEER_CACHE_DIR}`);
 
 const missingVars = [];
 if (!TELEGRAM_TOKEN) missingVars.push("TELEGRAM_TOKEN");
@@ -147,7 +142,6 @@ async function buscarPromo(esPrueba = false) {
 
     browser = await puppeteer.launch({
       headless: "new",
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--single-process"]
     });
 
