@@ -105,13 +105,13 @@ mongoose.connection.on("error", (err) => {
 function crearImagenFusionada(urlBase, urlDetalle) {
   if (!urlBase || !urlDetalle) return null;
   const urlDetalleB64 = Buffer.from(urlDetalle).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  const urlDetalleB64 = Buffer.from(urlDetalle)
+  return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/l_fetch:${urlDetalleB64}/fl_layer_apply,g_center/q_auto,f_jpg/${urlBase}`;
+
+  return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/l_fetch:${Buffer.from(urlDetalle)
     .toString("base64")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
-    .replace(/=+$/, "");
-
-  return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/l_fetch:${urlDetalleB64}/fl_layer_apply,g_center/q_auto,f_jpg/${urlBase}`;
+    .replace(/=+$/, "")}/fl_layer_apply,g_center/q_auto,f_jpg/${urlBase}`;
 }
 
 async function enviarTelegram(promo, tipoMensaje) {
