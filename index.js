@@ -1,15 +1,18 @@
 const http = require("http");
+const path = require("path");
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 const qs = require("qs");
 const mongoose = require("mongoose");
+
+process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || path.join(__dirname, ".cache", "puppeteer");
 
 // ---------------------------
 // Configuración
 // ---------------------------
 const CLOUD_NAME = "dvye0cje6";
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHATID || process.env.CHAT_ID || "";
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = Number(process.env.PORT || 10000);
 const CHECK_INTERVAL_MINUTES = Number(process.env.CHECK_INTERVAL_MINUTES || 60);
@@ -26,10 +29,16 @@ console.log(`2. CHAT_ID: ${TELEGRAM_CHAT_ID ? "✅" : "❌"}`);
 console.log(`3. MONGO: ${MONGO_URI ? "✅" : "❌"}`);
 console.log(`4. PORT: ${PORT}`);
 console.log(`5. CHECK_INTERVAL_MINUTES: ${CHECK_INTERVAL_MINUTES}`);
+console.log(`6. PUPPETEER_CACHE_DIR: ${process.env.PUPPETEER_CACHE_DIR}`);
 
-if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID || !MONGO_URI) {
-  console.error("❌ Faltan variables de entorno obligatorias.");
-  process.exit(1);
+const missingVars = [];
+if (!TELEGRAM_TOKEN) missingVars.push("TELEGRAM_TOKEN");
+if (!TELEGRAM_CHAT_ID) missingVars.push("TELEGRAM_CHAT_ID");
+if (!MONGO_URI) missingVars.push("MONGO_URI");
+
+if (missingVars.length) {
+  console.warn(`⚠️ Faltan variables: ${missingVars.join(", ")}`);
+  console.warn("⚠️ El servicio seguirá arriba, pero el bot no podrá operar al 100%.");
 }
 
 // ---------------------------
@@ -83,6 +92,11 @@ function crearImagenFusionada(urlBase, urlDetalle) {
 }
 
 async function enviarTelegram(promo, tipoMensaje) {
+  if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
+    console.warn("⚠️ Telegram no configurado (falta TELEGRAM_TOKEN o TELEGRAM_CHAT_ID). Se omite envío.");
+    return;
+  }
+
   try {
     await axios.post(
       `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
@@ -122,12 +136,17 @@ async function buscarPromo(esPrueba = false) {
   let browser;
 
   try {
+    if (!MONGO_URI) {
+      throw new Error("Falta MONGO_URI");
+    }
+
     if (mongoose.connection.readyState === 0) {
       await mongoose.connect(MONGO_URI);
     }
 
     browser = await puppeteer.launch({
       headless: "new",
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--single-process"]
     });
 
