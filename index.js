@@ -44,13 +44,14 @@ http
   .createServer((req, res) => {
     if (req.url === "/health") {
       const payload = {
-        ok: lastStatus !== "error",
-        status: lastStatus,
+        ok: true,
+        service: "up",
+        botStatus: lastStatus,
         isRunning,
         lastRunAt,
         lastError
       };
-      res.writeHead(payload.ok ? 200 : 500, { "Content-Type": "application/json" });
+      res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(payload));
       return;
     }
