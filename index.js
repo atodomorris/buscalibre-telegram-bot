@@ -3,6 +3,8 @@ const puppeteer = require("puppeteer");
 const axios = require("axios");
 const qs = require("qs");
 const mongoose = require("mongoose");
+const { execFileSync } = require("child_process");
+const path = require("path");
 
 // ---------------------------
 // Configuración
@@ -118,6 +120,27 @@ async function enviarTelegram(promo, tipoMensaje) {
   }
 }
 
+async function lanzarBrowserConAutoInstalacion() {
+  const launchOptions = {
+    headless: "new",
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--single-process"]
+  };
+
+  try {
+    return await puppeteer.launch(launchOptions);
+  } catch (e) {
+    const msg = String(e?.message || "");
+    if (!msg.includes("Could not find Chrome")) {
+      throw e;
+    }
+
+    console.log("🛠️ Chrome no encontrado. Intentando instalación automática...");
+    const cliPath = path.join(__dirname, "node_modules", "puppeteer", "lib", "cjs", "puppeteer", "node", "cli.js");
+    execFileSync(process.execPath, [cliPath, "browsers", "install", "chrome"], { stdio: "inherit" });
+    return await puppeteer.launch(launchOptions);
+  }
+}
+
 async function buscarPromo(esPrueba = false) {
   if (isRunning) {
     console.log("⏳ Ya hay una ejecución en curso, se omite esta ronda.");
@@ -141,10 +164,7 @@ async function buscarPromo(esPrueba = false) {
       await mongoose.connect(MONGO_URI);
     }
 
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--single-process"]
-    });
+    browser = await lanzarBrowserConAutoInstalacion();
 
     const page = await browser.newPage();
     await page.setRequestInterception(true);
