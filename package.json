@@ -4,7 +4,8 @@
   "description": "Scraper de Buscalibre que notifica promociones por Telegram",
   "main": "index.js",
   "scripts": {
-    "start": "node --check index.js && node index.js"
+    "start": "node --check index.js && node index.js",
+    "postinstall": "PUPPETEER_CACHE_DIR=.cache/puppeteer npx puppeteer browsers install chrome"
   },
   "author": "TU_NOMBRE",
   "license": "MIT",
