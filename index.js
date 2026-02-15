@@ -14,13 +14,11 @@ const MONGO_URI = process.env.MONGO_URI;
 const PORT = Number(process.env.PORT || 10000);
 const CHECK_INTERVAL_MINUTES = Number(process.env.CHECK_INTERVAL_MINUTES || 60);
 const CHECK_INTERVAL_MS = Math.max(1, CHECK_INTERVAL_MINUTES) * 60 * 1000;
-const TARGET_URL = "https://www.buscalibre.cl";
 
-let lastRunAt = null;
 let lastStatus = "starting";
+let lastRunAt = null;
 let lastError = null;
 let isRunning = false;
-let intervalRef;
 
 // Diagnóstico
 console.log("🔍 --- REVISIÓN VARIABLES ---");
@@ -37,33 +35,32 @@ if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID || !MONGO_URI) {
 
 // ---------------------------
 // Base de Datos (Modelo Estándar)
-// Healthcheck server (Render + UptimeRobot)
+// Healthcheck para Render/UptimeRobot
 // ---------------------------
-const server = http.createServer((req, res) => {
-  if (req.url === "/health") {
-    const payload = {
-      ok: lastStatus !== "error",
-      status: lastStatus,
-      isRunning,
-      lastRunAt,
-      lastError,
-      uptimeSec: Math.round(process.uptime())
-    };
-    res.writeHead(payload.ok ? 200 : 500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(payload));
-    return;
-  }
+http
+  .createServer((req, res) => {
+    if (req.url === "/health") {
+      const payload = {
+        ok: lastStatus !== "error",
+        status: lastStatus,
+        isRunning,
+        lastRunAt,
+        lastError
+      };
+      res.writeHead(payload.ok ? 200 : 500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(payload));
+      return;
+    }
 
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Buscalibre bot alive");
-});
-
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 Healthcheck activo en puerto ${PORT}`);
-});
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+  })
+  .listen(PORT, "0.0.0.0", () => {
+    console.log(`🌐 Healthcheck activo en puerto ${PORT}`);
+  });
 
 // ---------------------------
-// Base de Datos
+// Base de Datos (modelo original)
 // ---------------------------
 const promoSchema = new mongoose.Schema({
   idImagen: String,
@@ -77,28 +74,6 @@ const promoSchema = new mongoose.Schema({
 
 const PromoModel = mongoose.model("PromoBuscalibre", promoSchema);
 
-async function connectToMongo() {
-  if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) {
-    return;
-  }
-
-  await mongoose.connect(MONGO_URI, {
-    serverSelectionTimeoutMS: 15000,
-    socketTimeoutMS: 45000,
-    maxPoolSize: 5
-  });
-}
-
-mongoose.connection.on("connected", () => {
-  console.log("✅ Mongo conectado");
-});
-mongoose.connection.on("disconnected", () => {
-  console.log("⚠️ Mongo desconectado");
-});
-mongoose.connection.on("error", (err) => {
-  console.error("❌ Error Mongo:", err.message);
-});
-
 // ---------------------------
 // Funciones
 // ---------------------------
@@ -106,12 +81,13 @@ function crearImagenFusionada(urlBase, urlDetalle) {
   if (!urlBase || !urlDetalle) return null;
   const urlDetalleB64 = Buffer.from(urlDetalle).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/l_fetch:${urlDetalleB64}/fl_layer_apply,g_center/q_auto,f_jpg/${urlBase}`;
-
-  return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/l_fetch:${Buffer.from(urlDetalle)
+  const detalle = Buffer.from(urlDetalle)
     .toString("base64")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
-    .replace(/=+$/, "")}/fl_layer_apply,g_center/q_auto,f_jpg/${urlBase}`;
+    .replace(/=+$/, "");
+
+  return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/l_fetch:${detalle}/fl_layer_apply,g_center/q_auto,f_jpg/${urlBase}`;
 }
 
 async function enviarTelegram(promo, tipoMensaje) {
@@ -141,13 +117,8 @@ async function enviarTelegram(promo, tipoMensaje) {
         reply_markup: JSON.stringify({
           inline_keyboard: [[{ text: "🚀 Ver Ofertas", url: promo.link }]]
         })
-      }),
-      {
-        timeout: 20000,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }
-      }
+      })
     );
-
     console.log(`✅ Enviado: ${tipoMensaje}`);
   } catch (e) { console.error("❌ Error Telegram:", e.message); }
   } catch (e) {
@@ -159,35 +130,33 @@ async function enviarTelegram(promo, tipoMensaje) {
 // Lógica Principal
 // ---------------------------
 async function buscarPromo(esPrueba = false) {
+  console.log("🔎 Buscando...", new Date().toLocaleString());
   if (isRunning) {
-    console.log("⏳ Ejecución anterior aún en progreso, se omite esta ronda.");
+    console.log("⏳ Ya hay una ejecución en curso, se omite esta ronda.");
     return;
   }
 
+  if (mongoose.connection.readyState === 0) await mongoose.connect(MONGO_URI);
   isRunning = true;
   lastStatus = "running";
   lastError = null;
-  console.log("🔎 Buscando...", new Date().toLocaleString());
-
-  if (mongoose.connection.readyState === 0) await mongoose.connect(MONGO_URI);
 
   const browser = await puppeteer.launch({
     headless: "new",
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--single-process"]
   });
+  console.log("🔎 Buscando...", new Date().toLocaleString());
+
   let browser;
 
   try {
-    await connectToMongo();
+    if (mongoose.connection.readyState === 0) {
+      await mongoose.connect(MONGO_URI);
+    }
 
     browser = await puppeteer.launch({
       headless: "new",
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--single-process"
-      ]
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--single-process"]
     });
 
     const page = await browser.newPage();
@@ -195,20 +164,12 @@ async function buscarPromo(esPrueba = false) {
     page.on('request', r => ['font', 'stylesheet'].includes(r.resourceType()) ? r.abort() : r.continue());
     
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
-    await page.goto("https://www.buscalibre.cl", { waitUntil: "domcontentloaded", timeout: 60000 });
-    page.on("request", (request) => {
-      const type = request.resourceType();
-      if (["font", "stylesheet"].includes(type)) {
-        request.abort();
-        return;
-      }
-      request.continue();
-    });
+    page.on("request", (r) => (["font", "stylesheet"].includes(r.resourceType()) ? r.abort() : r.continue()));
 
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
     );
-    await page.goto(TARGET_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto("https://www.buscalibre.cl", { waitUntil: "domcontentloaded", timeout: 60000 });
 
     const datos = await page.evaluate(() => {
       const aviso = document.querySelector(".avisoTop");
@@ -245,7 +206,6 @@ async function buscarPromo(esPrueba = false) {
     };
 
     const ultimaDB = await PromoModel.findOne();
-    const ultimaDB = await PromoModel.findOne().sort({ fecha: -1 });
 
     if (esPrueba) {
       await enviarTelegram(promoActual, "FULL");
@@ -255,7 +215,7 @@ async function buscarPromo(esPrueba = false) {
       console.log("🆕 Inicio Limpio. Guardando Original.");
       // Guardamos la promo actual como la "Original"
     } else if (!ultimaDB) {
-      console.log("🆕 Inicio limpio. Guardando promo base.");
+      console.log("🆕 Inicio limpio. Guardando original.");
       await PromoModel.create({ ...promoActual, textoOriginalBanner: promoActual.textoCintillo });
     }
     else {
@@ -267,20 +227,12 @@ async function buscarPromo(esPrueba = false) {
       if (cambioImg) {
         if (hayVisual) {
           console.log("🎨 Cambio Banner -> FULL");
-          console.log("🎨 Cambio banner -> FULL");
           await enviarTelegram(promoActual, "FULL");
           await PromoModel.updateOne({}, { ...promoActual, textoOriginalBanner: promoActual.textoCintillo });
-          await PromoModel.findByIdAndUpdate(
-            ultimaDB._id,
-            { ...promoActual, textoOriginalBanner: promoActual.textoCintillo, fecha: new Date() },
-            { new: true }
-          );
         } else {
           console.log("⚠️ Sin Banner -> TEXTO");
-          console.log("⚠️ Sin banner -> TEXTO");
           await enviarTelegram(promoActual, "TEXT_ONLY");
           await PromoModel.updateOne({}, promoActual);
-          await PromoModel.findByIdAndUpdate(ultimaDB._id, { ...promoActual, fecha: new Date() }, { new: true });
         }
       } 
       else if (cambioTxt) {
@@ -289,7 +241,7 @@ async function buscarPromo(esPrueba = false) {
         if (promoActual.textoCintillo === ultimaDB.textoOriginalBanner) {
            console.log("🔄 Retorno a Original -> FULL");
            await enviarTelegram(promoActual, "FULL");
-          console.log("🔄 Retorno a original -> FULL");
+          console.log("🔄 Retorno a Original -> FULL");
           await enviarTelegram(promoActual, "FULL");
         } else {
            console.log("⚡ Relámpago -> TEXTO");
@@ -300,68 +252,25 @@ async function buscarPromo(esPrueba = false) {
         await PromoModel.updateOne({}, { $set: { textoCintillo: promoActual.textoCintillo, link: promoActual.link } });
       } 
       else {
-
-        await PromoModel.findByIdAndUpdate(
-          ultimaDB._id,
-          { textoCintillo: promoActual.textoCintillo, link: promoActual.link, fecha: new Date() },
-          { new: true }
-        );
       } else {
         console.log("💤 Sin cambios");
       }
     }
 
   } catch (e) { console.error(e); } finally { if (browser) await browser.close(); }
-    lastRunAt = new Date().toISOString();
     lastStatus = "ok";
+    lastRunAt = new Date().toISOString();
   } catch (e) {
     lastStatus = "error";
     lastError = e.message;
-    console.error("❌ Error en ejecución:", e);
+    console.error("❌ Error general:", e.message);
   } finally {
     isRunning = false;
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
   }
 }
 
 buscarPromo(false); 
 setInterval(() => buscarPromo(false), 3600000);
-function startScheduler() {
-  buscarPromo(false).catch((err) => {
-    console.error("❌ Error en ejecución inicial:", err);
-  });
-
-  intervalRef = setInterval(() => {
-    buscarPromo(false).catch((err) => {
-      console.error("❌ Error en ejecución programada:", err);
-    });
-  }, CHECK_INTERVAL_MS);
-
-  console.log(`⏱️ Scheduler iniciado cada ${CHECK_INTERVAL_MINUTES} minuto(s).`);
-}
-
-async function shutdown(signal) {
-  console.log(`\n🛑 Recibido ${signal}, cerrando...`);
-
-  if (intervalRef) {
-    clearInterval(intervalRef);
-  }
-
-  try {
-    await mongoose.connection.close();
-  } catch (e) {
-    console.error("Error cerrando Mongo:", e.message);
-  }
-
-  server.close(() => {
-    console.log("👋 Proceso finalizado correctamente.");
-    process.exit(0);
-  });
-}
-
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-
-startScheduler();
+buscarPromo(false);
+setInterval(() => buscarPromo(false), CHECK_INTERVAL_MS);
