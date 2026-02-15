@@ -90,6 +90,21 @@ function crearImagenFusionada(urlBase, urlDetalle) {
   return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/l_fetch:${detalle}/fl_layer_apply,g_center/q_auto,f_jpg/${urlBase}`;
 }
 
+
+function normalizarTextoPromo(texto = "") {
+  return String(texto).replace(/\s+/g, " ").trim();
+}
+
+function normalizarIdImagen(url = "") {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return String(url).split("?")[0].trim();
+  }
+}
+
 async function enviarTelegram(promo, tipoMensaje) {
   if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
     console.warn("⚠️ Telegram no configurado (falta TELEGRAM_TOKEN o TELEGRAM_CHAT_ID). Se omite envío.");
@@ -197,19 +212,19 @@ async function buscarPromo(esPrueba = false) {
     });
 
     const promoActual = {
-      idImagen: datos.pngUrl,
-      textoCintillo: datos.texto,
+      idImagen: normalizarIdImagen(datos.pngUrl),
+      textoCintillo: normalizarTextoPromo(datos.texto),
       link: datos.link,
       imagenFusionada: crearImagenFusionada(datos.jpgUrl, datos.pngUrl)
     };
 
-    const ultimaDB = await PromoModel.findOne();
+    const ultimaDB = await PromoModel.findOne().sort({ fecha: -1 }).lean();
 
     if (esPrueba) {
       await enviarTelegram(promoActual, "FULL");
     } else if (!ultimaDB) {
       console.log("🆕 Inicio limpio. Guardando original.");
-      await PromoModel.create({ ...promoActual, textoOriginalBanner: promoActual.textoCintillo });
+      await PromoModel.create({ ...promoActual, textoOriginalBanner: promoActual.textoCintillo, fecha: new Date() });
     } else {
       const cambioImg = promoActual.idImagen !== ultimaDB.idImagen;
       const cambioTxt = promoActual.textoCintillo !== ultimaDB.textoCintillo;
@@ -219,11 +234,11 @@ async function buscarPromo(esPrueba = false) {
         if (hayVisual) {
           console.log("🎨 Cambio Banner -> FULL");
           await enviarTelegram(promoActual, "FULL");
-          await PromoModel.updateOne({}, { ...promoActual, textoOriginalBanner: promoActual.textoCintillo });
+          await PromoModel.updateOne({ _id: ultimaDB._id }, { ...promoActual, textoOriginalBanner: promoActual.textoCintillo, fecha: new Date() });
         } else {
           console.log("⚠️ Sin Banner -> TEXTO");
           await enviarTelegram(promoActual, "TEXT_ONLY");
-          await PromoModel.updateOne({}, promoActual);
+          await PromoModel.updateOne({ _id: ultimaDB._id }, { ...promoActual, fecha: new Date() });
         }
       } else if (cambioTxt) {
         if (promoActual.textoCintillo === ultimaDB.textoOriginalBanner) {
@@ -233,7 +248,7 @@ async function buscarPromo(esPrueba = false) {
           console.log("⚡ Relámpago -> TEXTO");
           await enviarTelegram(promoActual, "TEXT_ONLY");
         }
-        await PromoModel.updateOne({}, { $set: { textoCintillo: promoActual.textoCintillo, link: promoActual.link } });
+        await PromoModel.updateOne({ _id: ultimaDB._id }, { $set: { textoCintillo: promoActual.textoCintillo, link: promoActual.link, fecha: new Date() } });
       } else {
         console.log("💤 Sin cambios");
       }
