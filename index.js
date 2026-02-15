@@ -1,11 +1,12 @@
 const http = require("http");
 const path = require("path");
+
+process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || path.join(__dirname, ".cache", "puppeteer");
+
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 const qs = require("qs");
 const mongoose = require("mongoose");
-
-process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || path.join(__dirname, ".cache", "puppeteer");
 
 // ---------------------------
 // Configuración
