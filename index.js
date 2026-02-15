@@ -20,7 +20,6 @@ let lastRunAt = null;
 let lastError = null;
 let isRunning = false;
 
-// Diagnóstico
 console.log("🔍 --- REVISIÓN VARIABLES ---");
 console.log(`1. TOKEN: ${TELEGRAM_TOKEN ? "✅" : "❌"}`);
 console.log(`2. CHAT_ID: ${TELEGRAM_CHAT_ID ? "✅" : "❌"}`);
@@ -34,7 +33,6 @@ if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID || !MONGO_URI) {
 }
 
 // ---------------------------
-// Base de Datos (Modelo Estándar)
 // Healthcheck para Render/UptimeRobot
 // ---------------------------
 http
@@ -65,7 +63,6 @@ http
 const promoSchema = new mongoose.Schema({
   idImagen: String,
   textoCintillo: String,
-  textoOriginalBanner: String, // La identidad real de la promo
   textoOriginalBanner: String,
   link: String,
   imagenFusionada: String,
@@ -74,13 +71,8 @@ const promoSchema = new mongoose.Schema({
 
 const PromoModel = mongoose.model("PromoBuscalibre", promoSchema);
 
-// ---------------------------
-// Funciones
-// ---------------------------
 function crearImagenFusionada(urlBase, urlDetalle) {
   if (!urlBase || !urlDetalle) return null;
-  const urlDetalleB64 = Buffer.from(urlDetalle).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `https://res.cloudinary.com/${CLOUD_NAME}/image/fetch/l_fetch:${urlDetalleB64}/fl_layer_apply,g_center/q_auto,f_jpg/${urlBase}`;
   const detalle = Buffer.from(urlDetalle)
     .toString("base64")
     .replace(/\+/g, "-")
@@ -91,27 +83,17 @@ function crearImagenFusionada(urlBase, urlDetalle) {
 }
 
 async function enviarTelegram(promo, tipoMensaje) {
-  let mensaje = `🚨 <b>NUEVA PROMO DETECTADA!</b>\n\n`;
-  let mensaje = "🚨 <b>NUEVA PROMO DETECTADA!</b>\n\n";
-  mensaje += `<b>${promo.textoCintillo || "Revisa la web"}</b>`;
-
-  if (tipoMensaje === "FULL" && promo.imagenFusionada) {
-    mensaje += `<a href="${promo.imagenFusionada}">&#8205;</a>`;
-  }
-
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, qs.stringify({
-      chat_id: TELEGRAM_CHAT_ID,
-      text: mensaje,
-      parse_mode: "HTML",
-      disable_web_page_preview: false,
-      reply_markup: JSON.stringify({ inline_keyboard: [[{ text: "🚀 Ver Ofertas", url: promo.link }]] })
-    }));
     await axios.post(
       `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
       qs.stringify({
         chat_id: TELEGRAM_CHAT_ID,
-        text: mensaje,
+        text:
+          "🚨 <b>NUEVA PROMO DETECTADA!</b>\n\n" +
+          `<b>${promo.textoCintillo || "Revisa la web"}</b>` +
+          (tipoMensaje === "FULL" && promo.imagenFusionada
+            ? `<a href="${promo.imagenFusionada}">&#8205;</a>`
+            : ""),
         parse_mode: "HTML",
         disable_web_page_preview: false,
         reply_markup: JSON.stringify({
@@ -120,31 +102,21 @@ async function enviarTelegram(promo, tipoMensaje) {
       })
     );
     console.log(`✅ Enviado: ${tipoMensaje}`);
-  } catch (e) { console.error("❌ Error Telegram:", e.message); }
   } catch (e) {
     console.error("❌ Error Telegram:", e.message);
   }
 }
 
-// ---------------------------
-// Lógica Principal
-// ---------------------------
 async function buscarPromo(esPrueba = false) {
-  console.log("🔎 Buscando...", new Date().toLocaleString());
   if (isRunning) {
     console.log("⏳ Ya hay una ejecución en curso, se omite esta ronda.");
     return;
   }
 
-  if (mongoose.connection.readyState === 0) await mongoose.connect(MONGO_URI);
   isRunning = true;
   lastStatus = "running";
   lastError = null;
 
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--single-process"]
-  });
   console.log("🔎 Buscando...", new Date().toLocaleString());
 
   let browser;
@@ -161,9 +133,6 @@ async function buscarPromo(esPrueba = false) {
 
     const page = await browser.newPage();
     await page.setRequestInterception(true);
-    page.on('request', r => ['font', 'stylesheet'].includes(r.resourceType()) ? r.abort() : r.continue());
-    
-    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
     page.on("request", (r) => (["font", "stylesheet"].includes(r.resourceType()) ? r.abort() : r.continue()));
 
     await page.setUserAgent(
@@ -173,15 +142,10 @@ async function buscarPromo(esPrueba = false) {
 
     const datos = await page.evaluate(() => {
       const aviso = document.querySelector(".avisoTop");
-      let txt = aviso ? aviso.innerText.replace(/Ver más/gi, "").trim() : "";
-      let link = aviso ? aviso.querySelector("a")?.href : null;
-      
       const txt = aviso ? aviso.innerText.replace(/Ver más/gi, "").trim() : "";
       const link = aviso ? aviso.querySelector("a")?.href : null;
 
       const img = document.querySelector("section#portadaHome img[alt]");
-      const bg = img ? img.closest("div[style*='background-image']")?.getAttribute('style')?.match(/url\(\s*['"]?(.*?)['"]?\s*\)/)?.[1] : "";
-      
       const bg = img
         ? img
             .closest("div[style*='background-image']")
@@ -190,7 +154,6 @@ async function buscarPromo(esPrueba = false) {
         : "";
 
       return {
-        pngUrl: img && img.src.startsWith('http') ? img.src : "",
         pngUrl: img && img.src.startsWith("http") ? img.src : "",
         jpgUrl: bg || "",
         texto: txt,
@@ -209,16 +172,9 @@ async function buscarPromo(esPrueba = false) {
 
     if (esPrueba) {
       await enviarTelegram(promoActual, "FULL");
-    }
-    // --- AQUÍ OCURRE LA MAGIA DEL REINICIO ---
-    else if (!ultimaDB) {
-      console.log("🆕 Inicio Limpio. Guardando Original.");
-      // Guardamos la promo actual como la "Original"
     } else if (!ultimaDB) {
       console.log("🆕 Inicio limpio. Guardando original.");
       await PromoModel.create({ ...promoActual, textoOriginalBanner: promoActual.textoCintillo });
-    }
-    else {
     } else {
       const cambioImg = promoActual.idImagen !== ultimaDB.idImagen;
       const cambioTxt = promoActual.textoCintillo !== ultimaDB.textoCintillo;
@@ -234,30 +190,20 @@ async function buscarPromo(esPrueba = false) {
           await enviarTelegram(promoActual, "TEXT_ONLY");
           await PromoModel.updateOne({}, promoActual);
         }
-      } 
-      else if (cambioTxt) {
-        // LÓGICA DE RETORNO
       } else if (cambioTxt) {
         if (promoActual.textoCintillo === ultimaDB.textoOriginalBanner) {
-           console.log("🔄 Retorno a Original -> FULL");
-           await enviarTelegram(promoActual, "FULL");
           console.log("🔄 Retorno a Original -> FULL");
           await enviarTelegram(promoActual, "FULL");
         } else {
-           console.log("⚡ Relámpago -> TEXTO");
-           await enviarTelegram(promoActual, "TEXT_ONLY");
           console.log("⚡ Relámpago -> TEXTO");
           await enviarTelegram(promoActual, "TEXT_ONLY");
         }
         await PromoModel.updateOne({}, { $set: { textoCintillo: promoActual.textoCintillo, link: promoActual.link } });
-      } 
-      else {
       } else {
         console.log("💤 Sin cambios");
       }
     }
 
-  } catch (e) { console.error(e); } finally { if (browser) await browser.close(); }
     lastStatus = "ok";
     lastRunAt = new Date().toISOString();
   } catch (e) {
@@ -270,7 +216,5 @@ async function buscarPromo(esPrueba = false) {
   }
 }
 
-buscarPromo(false); 
-setInterval(() => buscarPromo(false), 3600000);
 buscarPromo(false);
 setInterval(() => buscarPromo(false), CHECK_INTERVAL_MS);
