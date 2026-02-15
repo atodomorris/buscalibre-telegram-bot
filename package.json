@@ -4,7 +4,6 @@
   "description": "Scraper de Buscalibre que notifica promociones por Telegram",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
     "start": "node --check index.js && node index.js"
   },
   "author": "TU_NOMBRE",
