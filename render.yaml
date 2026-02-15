@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: buscalibre-telegram-bot
+    env: node
+    plan: free
+    buildCommand: npm install && node node_modules/puppeteer/lib/cjs/puppeteer/node/cli.js browsers install chrome
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: CHECK_INTERVAL_MINUTES
+        value: "60"
