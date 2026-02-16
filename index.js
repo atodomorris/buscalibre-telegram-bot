@@ -74,6 +74,7 @@ const promoSchema = new mongoose.Schema({
   textoOriginalBanner: String,
   link: String,
   imagenFusionada: String,
+  ultimaClaveNotificada: String,
   fecha: { type: Date, default: Date.now }
 });
 
@@ -103,6 +104,24 @@ function normalizarIdImagen(url = "") {
   } catch {
     return String(url).split("?")[0].trim();
   }
+}
+
+function normalizarLinkPromo(url = "") {
+  if (!url) return "https://www.buscalibre.cl";
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return String(url).split("?")[0].trim();
+  }
+}
+
+function crearClaveNotificacion(promo) {
+  return [
+    normalizarTextoPromo(promo?.textoCintillo || ""),
+    normalizarLinkPromo(promo?.link || ""),
+    normalizarIdImagen(promo?.idImagen || "")
+  ].join("|");
 }
 
 async function enviarTelegram(promo, tipoMensaje) {
@@ -198,7 +217,7 @@ async function buscarPromo(esPrueba = false) {
 
     const datos = await page.evaluate(() => {
       const aviso = document.querySelector(".avisoTop");
-      const txt = aviso ? aviso.innerText.replace(/Ver más/gi, "").trim() : "";
+      const txt = aviso ? aviso.innerText.replace(/Ver\s+(más|ofertas)/gi, "").trim() : "";
       const link = aviso ? aviso.querySelector("a")?.href : null;
 
       const img = document.querySelector("section#portadaHome img[alt]");
@@ -220,43 +239,74 @@ async function buscarPromo(esPrueba = false) {
     const promoActual = {
       idImagen: normalizarIdImagen(datos.pngUrl),
       textoCintillo: normalizarTextoPromo(datos.texto),
-      link: datos.link,
+      link: normalizarLinkPromo(datos.link),
       imagenFusionada: crearImagenFusionada(datos.jpgUrl, datos.pngUrl)
     };
 
+    if (!promoActual.textoCintillo) {
+      console.log("⚠️ Cintillo vacío detectado (lectura incompleta). No se notifica.");
+      lastStatus = "ok";
+      lastRunAt = new Date().toISOString();
+      return;
+    }
+
+    const claveNotificacion = crearClaveNotificacion(promoActual);
     const ultimaDB = await PromoModel.findOne().sort({ fecha: -1 }).lean();
 
     if (esPrueba) {
       await enviarTelegram(promoActual, "FULL");
     } else if (!ultimaDB) {
       console.log("🆕 Inicio limpio. Guardando original.");
-      await PromoModel.create({ ...promoActual, textoOriginalBanner: promoActual.textoCintillo, fecha: new Date() });
+      await PromoModel.create({
+        ...promoActual,
+        textoOriginalBanner: promoActual.textoCintillo,
+        ultimaClaveNotificada: claveNotificacion,
+        fecha: new Date()
+      });
     } else {
-      const cambioImg = promoActual.idImagen !== ultimaDB.idImagen;
-      const cambioTxt = promoActual.textoCintillo !== ultimaDB.textoCintillo;
+      const cambioImg = promoActual.idImagen !== (ultimaDB.idImagen || "");
+      const cambioTxt = promoActual.textoCintillo !== (ultimaDB.textoCintillo || "");
+      const cambioLink = promoActual.link !== normalizarLinkPromo(ultimaDB.link || "");
       const hayVisual = promoActual.idImagen && promoActual.idImagen.length > 10;
+      const hayCambioPromoReal = cambioTxt || cambioLink;
 
-      if (cambioImg) {
-        if (hayVisual) {
-          console.log("🎨 Cambio Banner -> FULL");
-          await enviarTelegram(promoActual, "FULL");
-          await PromoModel.updateOne({ _id: ultimaDB._id }, { ...promoActual, textoOriginalBanner: promoActual.textoCintillo, fecha: new Date() });
+      if (!hayCambioPromoReal) {
+        if (cambioImg) {
+          console.log("🧩 Cambió solo la URL de imagen (sin cambio de promo). No se notifica.");
+          await PromoModel.updateOne(
+            { _id: ultimaDB._id },
+            { $set: { idImagen: promoActual.idImagen, imagenFusionada: promoActual.imagenFusionada, fecha: new Date() } }
+          );
         } else {
-          console.log("⚠️ Sin Banner -> TEXTO");
-          await enviarTelegram(promoActual, "TEXT_ONLY");
-          await PromoModel.updateOne({ _id: ultimaDB._id }, { ...promoActual, fecha: new Date() });
+          console.log("💤 Sin cambios");
         }
-      } else if (cambioTxt) {
-        if (promoActual.textoCintillo === ultimaDB.textoOriginalBanner) {
-          console.log("🔄 Retorno a Original -> FULL");
-          await enviarTelegram(promoActual, "FULL");
-        } else {
-          console.log("⚡ Relámpago -> TEXTO");
-          await enviarTelegram(promoActual, "TEXT_ONLY");
-        }
-        await PromoModel.updateOne({ _id: ultimaDB._id }, { $set: { textoCintillo: promoActual.textoCintillo, link: promoActual.link, fecha: new Date() } });
       } else {
-        console.log("💤 Sin cambios");
+        if (claveNotificacion === (ultimaDB.ultimaClaveNotificada || "")) {
+          console.log("🛡️ Promo ya notificada previamente. No se reenvía.");
+        } else {
+          const tipoMensaje = cambioImg && hayVisual ? "FULL" : "TEXT_ONLY";
+          const updateResult = await PromoModel.updateOne(
+            { _id: ultimaDB._id, ultimaClaveNotificada: { $ne: claveNotificacion } },
+            {
+              $set: {
+                idImagen: promoActual.idImagen,
+                textoCintillo: promoActual.textoCintillo,
+                textoOriginalBanner: promoActual.textoCintillo,
+                link: promoActual.link,
+                imagenFusionada: promoActual.imagenFusionada,
+                ultimaClaveNotificada: claveNotificacion,
+                fecha: new Date()
+              }
+            }
+          );
+
+          if (updateResult.modifiedCount === 0) {
+            console.log("🛡️ Otro proceso ya notificó esta promo. Se evita duplicado.");
+          } else {
+            console.log(`🆕 Cambio real detectado -> ${tipoMensaje}`);
+            await enviarTelegram(promoActual, tipoMensaje);
+          }
+        }
       }
     }
 
