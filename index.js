@@ -111,6 +111,12 @@ async function enviarTelegram(promo, tipoMensaje) {
     return;
   }
 
+  const textoLimpio = normalizarTextoPromo(promo?.textoCintillo || "");
+  if (!textoLimpio) {
+    console.warn("⚠️ Se omitió envío a Telegram porque el cintillo llegó vacío.");
+    return;
+  }
+
   try {
     await axios.post(
       `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
@@ -118,7 +124,7 @@ async function enviarTelegram(promo, tipoMensaje) {
         chat_id: TELEGRAM_CHAT_ID,
         text:
           "🚨 <b>NUEVA PROMO DETECTADA!</b>\n\n" +
-          `<b>${promo.textoCintillo || "Revisa la web"}</b>` +
+          `<b>${textoLimpio}</b>` +
           (tipoMensaje === "FULL" && promo.imagenFusionada
             ? `<a href="${promo.imagenFusionada}">&#8205;</a>`
             : ""),
