@@ -19,10 +19,13 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: 20
-        # Quitamos la línea del cache para solucionar el error
 
     - name: Instalar dependencias
       run: npm install
+
+    # PASO NUEVO: Forzar la instalación del motor de Chrome
+    - name: Instalar Chrome para Puppeteer
+      run: npx puppeteer browsers install chrome
 
     - name: Ejecutar Bot
       env:
