@@ -23,10 +23,6 @@ jobs:
     - name: Instalar dependencias
       run: npm install
 
-    # PASO NUEVO: Forzar la instalación del motor de Chrome
-    - name: Instalar Chrome para Puppeteer
-      run: npx puppeteer browsers install chrome
-
     - name: Ejecutar Bot
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
