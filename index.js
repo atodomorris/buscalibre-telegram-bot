@@ -76,8 +76,10 @@ async function buscarPromo() {
 
     const browser = await puppeteer.launch({
       headless: "new",
+      executablePath: '/usr/bin/google-chrome', // <-- ESTA LÍNEA HACE LA MAGIA EN GITHUB
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
     });
+
 
     const page = await browser.newPage();
     await page.setRequestInterception(true);
