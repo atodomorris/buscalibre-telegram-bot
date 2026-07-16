@@ -2,10 +2,15 @@ name: Bot Promos Buscalibre
 
 on:
   schedule:
-    # Se ejecuta a las 00:00, 13:00 y 18:00 UTC
-    # (Equivale aproximadamente a las 20:00, 09:00 y 14:00 de Chile)
-    - cron: '0 0,13,18 * * *'
-  workflow_dispatch: # Permite ejecutarlo manualmente
+    # 1. Revisión de las horas "en punto" (02:00, 10:00, 17:00 y 22:00 UTC)
+    # Equivale a las 22:00 (10pm), 06:00 (6am), 13:00 (1pm) y 18:00 (6pm) de Chile
+    - cron: '0 2,10,17,22 * * *'
+    
+    # 2. Revisión de la media hora (04:30 UTC)
+    # Equivale a las 00:30 (12:30am) de Chile
+    - cron: '30 4 * * *'
+    
+  workflow_dispatch: # Permite ejecutarlo manualmente cuando quieras
 
 jobs:
   run-bot:
